@@ -5,7 +5,7 @@
 //  Created by Frain on 2019/12/11.
 //
 
-#if os(iOS) || os(tvOS)
+#if !os(macOS)
 import UIKit
 
 public extension UIListView {
@@ -20,7 +20,7 @@ public extension UIListView {
         let id = NSStringFromClass(CustomCell.self) + identifier
         if !_storage.registeredCellIdentifiers.contains(id) {
             _storage.registeredCellIdentifiers.insert(id)
-            register(CustomCell.self, forCellReuseIdentifier: id)
+            register(cellClass, forCellReuseIdentifier: id)
         }
         return dequeueReusableCell(withIdentifier: id, for: indexPath) as! CustomCell
     }
@@ -36,7 +36,8 @@ public extension UIListView {
         let cell = dequeueReusableCell(withIdentifier: storyBoardIdentifier, for: indexPath)
         return cell as! CustomCell
     }
-    
+
+    #if !os(visionOS)
     func dequeueReusableCell<CustomCell: UIView>(
         _ cellClass: CustomCell.Type,
         withNibName nibName: String,
@@ -53,16 +54,17 @@ public extension UIListView {
         }
         return dequeueReusableCell(withIdentifier: nibName, for: indexPath) as! CustomCell
     }
+    #endif
 }
 
 public extension UICollectionView {
-    func dequeueReusableSupplementaryView<CustomSupplementaryView: UICollectionReusableView>(
+    func dequeueReusableSupplementaryView<SupplementaryView: UICollectionReusableView>(
         type: SupplementaryViewType,
-        _ supplementaryClass: CustomSupplementaryView.Type,
+        _ supplementaryClass: SupplementaryView.Type,
         identifier: String = "",
         indexPath: IndexPath
-    ) -> CustomSupplementaryView {
-        let id = NSStringFromClass(CustomSupplementaryView.self) + type.rawValue + identifier
+    ) -> SupplementaryView {
+        let id = NSStringFromClass(SupplementaryView.self) + type.rawValue + identifier
         if _storage.registeredSupplementaryIdentifiers[type]?.contains(id) != true {
             var identifiers = _storage.registeredSupplementaryIdentifiers[type] ?? .init()
             identifiers.insert(id)
@@ -74,16 +76,17 @@ public extension UICollectionView {
             withReuseIdentifier: id,
             for: indexPath
         )
-        return supplementaryView as! CustomSupplementaryView
+        return supplementaryView as! SupplementaryView
     }
-    
-    func dequeueReusableSupplementaryView<CustomSupplementaryView: UICollectionReusableView>(
+
+    #if !os(visionOS)
+    func dequeueReusableSupplementaryView<SupplementaryView: UICollectionReusableView>(
         type: SupplementaryViewType,
-        _ supplementaryClass: CustomSupplementaryView.Type,
+        _ supplementaryClass: SupplementaryView.Type,
         nibName: String,
         bundle: Bundle? = nil,
         indexPath: IndexPath
-    ) -> CustomSupplementaryView {
+    ) -> SupplementaryView {
         let nib = UINib(nibName: nibName, bundle: bundle)
         let id = nibName + type.rawValue
         if _storage.registeredSupplementaryNibName[type]?.contains(id) != true {
@@ -97,17 +100,18 @@ public extension UICollectionView {
             withReuseIdentifier: id,
             for: indexPath
         )
-        return supplementaryView as! CustomSupplementaryView
+        return supplementaryView as! SupplementaryView
     }
+    #endif
 }
 
 public extension UITableView {
-    func dequeueReusableSupplementaryView<CustomSupplementaryView: UITableViewHeaderFooterView>(
+    func dequeueReusableSupplementaryView<SupplementaryView: UITableViewHeaderFooterView>(
         type: SupplementaryViewType,
-        _ supplementaryClass: CustomSupplementaryView.Type,
+        _ supplementaryClass: SupplementaryView.Type,
         identifier: String = ""
-    ) -> CustomSupplementaryView? {
-        let id = NSStringFromClass(CustomSupplementaryView.self) + type.rawValue + identifier
+    ) -> SupplementaryView? {
+        let id = NSStringFromClass(SupplementaryView.self) + type.rawValue + identifier
         if _storage.registeredSupplementaryIdentifiers[type]?.contains(id) != true {
             var identifiers = _storage.registeredSupplementaryIdentifiers[type] ?? .init()
             identifiers.insert(id)
@@ -115,15 +119,16 @@ public extension UITableView {
             register(supplementaryViewType: type, supplementaryClass, identifier: id)
         }
         let supplementaryView = dequeueReusableHeaderFooterView(withIdentifier: id)
-        return supplementaryView as? CustomSupplementaryView
+        return supplementaryView as? SupplementaryView
     }
-    
-    func dequeueReusableSupplementaryView<CustomSupplementaryView: UITableViewHeaderFooterView>(
+
+    #if !os(visionOS)
+    func dequeueReusableSupplementaryView<SupplementaryView: UITableViewHeaderFooterView>(
         type: SupplementaryViewType,
-        _ supplementaryClass: CustomSupplementaryView.Type,
+        _ supplementaryClass: SupplementaryView.Type,
         nibName: String,
         bundle: Bundle? = nil
-    ) -> CustomSupplementaryView? {
+    ) -> SupplementaryView? {
         let nib = UINib(nibName: nibName, bundle: bundle)
         let id = nibName + type.rawValue
         if _storage.registeredSupplementaryNibName[type]?.contains(id) != true {
@@ -133,8 +138,9 @@ public extension UITableView {
             register(supplementaryViewType: type, nib, identifier: id)
         }
         let supplementaryView = dequeueReusableHeaderFooterView(withIdentifier: id)
-        return supplementaryView as? CustomSupplementaryView
+        return supplementaryView as? SupplementaryView
     }
+    #endif
 }
 
 #endif

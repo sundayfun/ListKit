@@ -2,131 +2,150 @@
 //  ListAdapter.swift
 //  ListKit
 //
-//  Created by Frain on 2019/12/16.
+//  Created by Frain on 2022/8/12.
 //
+
+// swiftlint:disable comment_spacing
 
 import Foundation
 
-protocol ListAdapter: UpdatableDataSource where Source == SourceBase {
-    associatedtype View: AnyObject
-    associatedtype ViewDelegates: AnyObject
-    associatedtype Erased
-    
-    var source: Source { get nonmutating set}
-    var storage: ListAdapterStorage<Source> { get }
-    var erasedGetter: (Self, ListOptions) -> Erased { get }
-    static var defaultErasedGetter: (Self, ListOptions) -> Erased { get }
-    static var rootKeyPath: ReferenceWritableKeyPath<CoordinatorContext, ViewDelegates> { get }
-    
-    init(
-        listContextSetups: [(ListCoordinatorContext<SourceBase>) -> Void],
-        source: Source,
-        erasedGetter: @escaping (Self, ListOptions) -> Erased
-    )
+public protocol ListAdapter: DataSource {
+    associatedtype View = Never
+    associatedtype List: ListAdapter = ListKit.List
+
+    @ListBuilder<View>
+    var list: List { get }
 }
 
-final class ListAdapterStorage<Source: DataSource> where Source.SourceBase == Source {
-    var source: Source
-    var makeListCoordinator: () -> ListCoordinator<Source> = { fatalError() }
-    
-    lazy var listCoordinator = makeListCoordinator()
-    lazy var coordinatorStorage = listCoordinator.storage.or(.init())
-    
-    init(source: Source) {
-        self.source = source
+public struct List: ListAdapter {
+    public var list: List { return self }
+    public let listCoordinator: ListCoordinator
+    public let listCoordinatorContext: ListCoordinatorContext
+}
+
+public extension ListAdapter {
+    var listCoordinator: ListCoordinator { list.listCoordinator }
+    var listCoordinatorContext: ListCoordinatorContext { list.listCoordinatorContext }
+}
+
+public extension ListAdapter where Self: AnyObject {
+    var listCoordinatorContext: ListCoordinatorContext {
+        listCoordinatorContext(from: list)
     }
-}
 
-extension ListAdapter
-where Erased: ListAdapter, Erased.Source == AnySources, Erased.Erased == Erased {
-    static var defaultErasedGetter: (Self, ListOptions) -> Erased {
-        {
-            .init(AnySources($0, options: $1)) { source, options in
-                source.source = AnySources(anySources: source.source, options: options)
-                return source
-            }
-        }
+    func performReload(
+        animated: Bool = true,
+        completion: ((ListView, Bool) -> Void)? = nil
+    ) {
+        _perform(reload: true, animated: animated, completion: completion)
+    }
+
+    func performUpdate(animated: Bool = true, completion: ((ListView, Bool) -> Void)? = nil) {
+        _perform(reload: false, animated: animated, completion: completion)
     }
 }
 
-extension ListAdapter {
-    init<OtherSource: DataSource>(
-        _ dataSource: OtherSource,
-        erasedGetter: @escaping (Self, ListOptions) -> Erased = Self.defaultErasedGetter
-    ) where OtherSource.SourceBase == Source {
-        self.init(listContextSetups: [], source: dataSource.sourceBase, erasedGetter: erasedGetter)
+public extension ListAdapter {
+    typealias ListContext = ListKit.ListContext<View>
+    typealias ElementContext = ListIndexContext<View, IndexPath>
+//    typealias ElementsContext = ListIndexContext<View, Set<IndexPath>>
+    typealias SectionContext = ListIndexContext<View, Int>
+
+    typealias Function<Input, Output, Closure> = ListKit.Function<View, List, Input, Output, Closure>
+    typealias ElementFunction<Input, Output, Closure> = IndexFunction<View, List, Input, Output, Closure, IndexPath>
+//    typealias ElementsFunction<Input, Output, Closure> = IndexFunction<View, List, Input, Output, Closure, Set<IndexPath>>
+    typealias SectionFunction<Input, Output, Closure> = IndexFunction<View, List, Input, Output, Closure, Int>
+
+    func buildList<List>(@ListBuilder<Void> list: () -> List) -> List {
+        list()
+    }
+}
+
+public extension ListAdapter where Self: ListCoordinator, Self == List {
+    var list: Self { self }
+    var listCoordinator: ListCoordinator { self }
+    var listCoordinatorContext: ListCoordinatorContext { .init(coordinator: self) }
+}
+
+public final class CoordinatorStorage: Hashable {
+    var context: ListCoordinatorContext?
+    var isObjectAssciated = false
+    var contexts = [ObjectIdentifier: (() -> Delegate?, [IndexPath])]()
+    weak var object: AnyObject?
+
+    public init() { }
+
+    init(_ object: AnyObject) {
+        self.object = object
+        self.isObjectAssciated = true
     }
 
-    init<OtherSource: ListAdapter>(
-        _ dataSource: OtherSource
-    ) where OtherSource.SourceBase == Source {
-        self.init(
-            listContextSetups: dataSource.listContextSetups,
-            source: dataSource.sourceBase,
-            erasedGetter: Self.defaultErasedGetter
-        )
+    deinit {
+        contexts.forEach {
+            let (getter, contexts) = $0.value
+            guard contexts.isEmpty else { return }
+            getter()?.listView.resetDelegates(toNil: true)
+        }
+    }
+}
+
+public extension CoordinatorStorage {
+    static func == (lhs: CoordinatorStorage, rhs: CoordinatorStorage) -> Bool {
+        lhs === rhs
     }
 
-    init<OtherSource: ListAdapter>(
-        erase dataSource: OtherSource,
-        options: ListOptions
-    ) where Self == OtherSource.Erased {
-        self = dataSource.erasedGetter(dataSource, options)
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(self))
     }
+}
 
-    func set<Input, Output>(
-        _ keyPath: ReferenceWritableKeyPath<ViewDelegates, Delegate<View, Input, Output>>,
-        _ closure: @escaping ((ListContext<View, Source>, Input)) -> Output
-    ) -> Self {
-        var setups = listContextSetups
-        setups.append {
-            let keyPath = Self.rootKeyPath.appending(path: keyPath)
-            $0.set(keyPath) { (context, object, input, root) in
-                closure((.init(context: context, listView: object, root: root), input))
+private var storageKey: Void?
+
+extension ListAdapter where Self: AnyObject {
+    func _perform(
+        reload: Bool,
+        animated: Bool,
+        completion: ((ListView, Bool) -> Void)? = nil
+    ) {
+//        if update.isEmpty { return }
+        guard let currentContext = coordinatorStorage.context else {
+            return
+        }
+        let isMainThread = Thread.isMainThread
+//        var update = update
+        var context: ListCoordinatorContext!
+        let work = {
+            context = self.list.listCoordinatorContext
+//            Log.log("----start-update: \(update.updateType)----")
+//            if update.needSource, update.source == nil {
+//                update.source = self.sourceBase.source
+//                Log.log("from \(self.currentSource)")
+//                Log.log("to   \(update.source!)")
+//            }
+        }
+        _ = isMainThread ? work() : DispatchQueue.main.sync(execute: work)
+        let update = reload ? .reload(change: nil) : currentContext.coordinator.performUpdate(to: context.coordinator)
+        let afterWork: () -> Void = {
+            defer { self.coordinatorStorage.context = context }
+            guard !self.coordinatorStorage.contexts.isEmpty else { return }
+            for (delegateGetter, positions) in self.coordinatorStorage.contexts.values {
+                delegateGetter()?.perform(update: update, animated: animated, to: context, at: positions, completion: completion)
             }
         }
-        return .init(listContextSetups: setups, source: source, erasedGetter: erasedGetter)
+        _ = isMainThread ? afterWork() : DispatchQueue.main.sync(execute: afterWork)
     }
 
-    func set<Input>(
-        _ keyPath: ReferenceWritableKeyPath<ViewDelegates, Delegate<View, Input, Void>>,
-        _ closure: @escaping ((ListContext<View, Source>, Input)) -> Void
-    ) -> Self {
-        var setups = listContextSetups
-        setups.append {
-            let keyPath = Self.rootKeyPath.appending(path: keyPath)
-            $0.set(keyPath) { (context, object, input, root) in
-                closure((.init(context: context, listView: object, root: root), input))
-            }
-        }
-        return .init(listContextSetups: setups, source: source, erasedGetter: erasedGetter)
+    func listCoordinatorContext(from list: DataSource) -> ListCoordinatorContext {
+        coordinatorStorage.context ?? {
+            var context = list.listCoordinatorContext
+            context.storage = coordinatorStorage
+            coordinatorStorage.context = context
+            return context
+        }()
     }
 
-    func set<Input, Output, Index: ListIndex>(
-        _ keyPath: ReferenceWritableKeyPath<ViewDelegates, IndexDelegate<View, Input, Output, Index>>,
-        _ closure: @escaping ((ListIndexContext<View, Source, Index>, Input)) -> Output
-    ) -> Self {
-        var setups = listContextSetups
-        setups.append {
-            let keyPath = Self.rootKeyPath.appending(path: keyPath), path = $0[keyPath: keyPath].index
-            $0.set(keyPath) {
-                closure((.init(context: $0, listView: $1, index: $2[keyPath: path], offset: $4, root: $3), $2))
-            }
-        }
-        return .init(listContextSetups: setups, source: source, erasedGetter: erasedGetter)
-    }
-
-    func set<Input, Index: ListIndex>(
-        _ keyPath: ReferenceWritableKeyPath<ViewDelegates, IndexDelegate<View, Input, Void, Index>>,
-        _ closure: @escaping ((ListIndexContext<View, Source, Index>, Input)) -> Void
-    ) -> Self {
-        var setups = listContextSetups
-        setups.append {
-            let keyPath = Self.rootKeyPath.appending(path: keyPath), path = $0[keyPath: keyPath].index
-            $0.set(keyPath) {
-                closure((.init(context: $0, listView: $1, index: $2[keyPath: path], offset: $4, root: $3), $2))
-            }
-        }
-        return .init(listContextSetups: setups, source: source, erasedGetter: erasedGetter)
+    var coordinatorStorage: CoordinatorStorage {
+        get { Associator.getValue(key: &storageKey, from: self, initialValue: .init(self)) }
+        set { Associator.set(value: newValue, key: &storageKey, to: self) }
     }
 }

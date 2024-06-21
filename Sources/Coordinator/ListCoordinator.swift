@@ -7,118 +7,165 @@
 
 import Foundation
 
-public class ListCoordinator<SourceBase: DataSource> where SourceBase.SourceBase == SourceBase {
-    typealias Item = SourceBase.Item
-    typealias Indices = ContiguousArray<(index: Int, isFake: Bool)>
+public enum Count: Equatable {
+    case items(Int?)
+    case sections(Int?, [Int], Int?)
+}
 
-    struct WeakContext {
-        weak var context: ListCoordinatorContext<SourceBase>?
+public protocol ListCoordinator {
+    var selectors: Set<Selector>? { get }
+    var count: Count { get }
+    var needSetupWithListView: Bool { get }
+    func setupWithListView(
+        offset: IndexPath,
+        storages: inout [CoordinatorStorage: [IndexPath]]
+    )
+
+    func performUpdate(to coordinator: ListCoordinator) -> BatchUpdates
+
+    @discardableResult
+    mutating func performUpdate(
+        update: inout BatchUpdates,
+        at position: IndexPath,
+        to context: ListCoordinatorContext
+    ) -> Bool
+
+    @discardableResult
+    func apply<Input, Output>(
+        _ selector: Selector,
+        for context: ListCoordinatorContext,
+        view: AnyObject,
+        with input: Input
+    ) -> Output?
+
+    @discardableResult
+    func apply<Input, Output, Index: ListKit.Index>(
+        _ selector: Selector,
+        for context: ListCoordinatorContext,
+        view: AnyObject,
+        with input: Input,
+        index: Index,
+        _ rawIndex: Index
+    ) -> Output?
+}
+
+public extension ListCoordinator {
+    var selectors: Set<Selector>? { nil }
+    var needSetupWithListView: Bool { false }
+
+    func setupWithListView(offset: IndexPath, storages: inout [CoordinatorStorage: [IndexPath]]) { }
+    func model(at indexPath: IndexPath) -> Any { fatalError() }
+
+    mutating func performUpdate(
+        update: inout BatchUpdates,
+        at position: IndexPath,
+        to context: ListCoordinatorContext
+    ) -> Bool { false }
+
+    func apply<Input, Output>(
+        _ selector: Selector,
+        for context: ListCoordinatorContext,
+        view: AnyObject,
+        with input: Input
+    ) -> Output? {
+        _apply(selector, for: context, view: view, with: input)
     }
-    
-    let update: ListUpdate<SourceBase>.Whole
-    let differ: ListDiffer<SourceBase>
-    var options: ListOptions
-    var source: SourceBase.Source!
-    
-    weak var storage: CoordinatorStorage<SourceBase>?
-    weak var currentCoordinatorUpdate: ListCoordinatorUpdate<SourceBase>?
-    var listContexts = [WeakContext]()
-    
-    lazy var sourceType = configSourceType()
-    
-    var sourceBaseType: Any.Type { SourceBase.self }
-    var isSectioned: Bool {
-        options.preferSection || listContexts.contains { $0.context?.selectorSets.hasIndex == true }
-    }
-    
-    init(
-        source: SourceBase.Source!,
-        update: ListUpdate<SourceBase>.Whole,
-        differ: ListDiffer<SourceBase> = .none,
-        options: ListOptions = .none
-    ) {
-        self.update = update
-        self.differ = differ
-        self.options = options
-        self.source = source
-    }
-    
-    init(_ sourceBase: SourceBase) {
-        self.differ = sourceBase.listDiffer
-        self.update = sourceBase.listUpdate
-        self.options = sourceBase.listOptions
-        self.source = sourceBase.source
-    }
-    
-    func numbersOfSections() -> Int { notImplemented() }
-    func numbersOfItems(in section: Int) -> Int { notImplemented() }
-    
-    func item(at indexPath: IndexPath) -> Item { notImplemented() }
-    
-    func configSourceType() -> SourceType { notImplemented() }
-    
-    func context(
-        with setups: [(ListCoordinatorContext<SourceBase>) -> Void] = []
-    ) -> ListCoordinatorContext<SourceBase> {
-        let context = ListCoordinatorContext(self, setups: setups)
-        listContexts.append(.init(context: context))
-        return context
-    }
-    
-    // Updates:
-    func identifier(for sourceBase: SourceBase) -> [AnyHashable] {
-        let id = ObjectIdentifier(sourceBaseType)
-        guard let identifier = differ.identifier else { return [id, sourceType] }
-        return [id, sourceType, identifier(sourceBase)]
-    }
-    
-    func equal(lhs: SourceBase, rhs: SourceBase) -> Bool {
-        differ.areEquivalent?(lhs, rhs) ?? true
-    }
-    
-    func update(
-        update: ListUpdate<SourceBase>,
-        options: ListOptions? = nil
-    ) -> ListCoordinatorUpdate<SourceBase> {
-        notImplemented()
-    }
-    
-    func update(
-        from coordinator: ListCoordinator<SourceBase>,
-        updateWay: ListUpdateWay<Item>?
-    ) -> ListCoordinatorUpdate<SourceBase> {
-        notImplemented()
+
+    func apply<Input, Output, Index: ListKit.Index>(
+        _ selector: Selector,
+        for context: ListCoordinatorContext,
+        view: AnyObject,
+        with input: Input,
+        index: Index,
+        _ rawIndex: Index
+    ) -> Output? {
+        _apply(selector, for: context, view: view, with: input, index: index, rawIndex)
     }
 }
 
 extension ListCoordinator {
-    func contextAndUpdates(update: CoordinatorUpdate) -> [(CoordinatorContext, CoordinatorUpdate)]? {
-        var results: [(CoordinatorContext, CoordinatorUpdate)]?
-        for context in listContexts {
-            guard let context = context.context else { continue }
-            if context.listView != nil {
-                results = results.map { $0 + [(context, update)] } ?? [(context, update)]
-            } else if let parentUpdate = context.update?(context.index, update) {
-                results = results.map { $0 + parentUpdate } ?? parentUpdate
-            }
-        }
-        return results
+    @discardableResult
+    func _apply<Input, Output>(
+        _ selector: Selector,
+        for context: ListCoordinatorContext,
+        view: AnyObject,
+        with input: Input
+    ) -> Output? {
+        guard let rawClosure = context.functions[selector],
+              let closure = rawClosure as? (AnyObject, ListCoordinatorContext, Input) -> Output
+        else { return nil }
+        return closure(view, context, input)
     }
-    
-    func offsetAndRoot(offset: IndexPath, list: ListView) -> [(IndexPath, CoordinatorContext)] {
-        var results = [(IndexPath, CoordinatorContext)]()
-        for context in self.listContexts {
-            guard let context = context.context else { continue }
-            if context.listView === list {
-                results.append((offset, context))
-            }
-            
-            results += context.contextAtIndex?(context.index, offset, list) ?? []
-        }
-        return results
-    }
-    
-    func resetDelegates() {
-        listContexts.forEach { $0.context?.reconfig() }
+
+    @discardableResult
+    func _apply<Input, Output, Index: ListKit.Index>(
+        _ selector: Selector,
+        for context: ListCoordinatorContext,
+        view: AnyObject,
+        with input: Input,
+        index: Index,
+        _ rawIndex: Index
+    ) -> Output? {
+        guard let rawClosure = context.functions[selector],
+              let closure = rawClosure as? (AnyObject, Index, Index, ListCoordinatorContext, Input) -> Output
+        else { return nil }
+        return closure(view, index, rawIndex, context, input)
     }
 }
+
+    // Updates:
+//    func identifier(for sourceBase: SourceBase) -> [AnyHashable] {
+//        let id = ObjectIdentifier(sourceBaseType)
+//        guard let identifier = differ.identifier else { return [id, sourceType] }
+//        return [id, sourceType, identifier(sourceBase)]
+//    }
+//
+//    func equal(lhs: SourceBase, rhs: SourceBase) -> Bool {
+//        differ.areEquivalent?(lhs, rhs) ?? true
+//    }
+//
+//    func update(
+//        update: ListUpdate<SourceBase>,
+//        options: ListOptions? = nil
+//    ) -> ListCoordinatorUpdate<SourceBase> {
+//        notImplemented()
+//    }
+
+//    func update(
+//        from coordinator: ListCoordinator
+//        updateWay: ListUpdateWay<Model>?
+//    ) -> ListCoordinatorUpdate<Model> {
+//        .init(self, options: (coordinator.options, options))
+//    }
+
+//extension ListCoordinator {
+//    func contextAndUpdates(update: CoordinatorUpdate) -> [(CoordinatorContext, CoordinatorUpdate)]? {
+//        var results: [(CoordinatorContext, CoordinatorUpdate)]?
+//        for context in listContexts {
+//            guard let context = context.context else { continue }
+//            if context.listView != nil {
+//                results = results.map { $0 + [(context, update)] } ?? [(context, update)]
+//            } else if let parentUpdate = context.update?(context.index, update) {
+//                results = results.map { $0 + parentUpdate } ?? parentUpdate
+//            }
+//        }
+//        return results
+//    }
+//
+//    func offsetAndRoot(offset: IndexPath, list: ListView) -> [(IndexPath, CoordinatorContext)] {
+//        var results = [(IndexPath, CoordinatorContext)]()
+//        for context in self.listContexts {
+//            guard let context = context.context else { continue }
+//            if context.listView === list {
+//                results.append((offset, context))
+//            }
+//
+//            results += context.contextAtIndex?(context.index, rawIndex, list) ?? []
+//        }
+//        return results
+//    }
+//
+//    func resetDelegates() {
+//        listContexts.forEach { $0.context?.reconfig() }
+//    }
+//}

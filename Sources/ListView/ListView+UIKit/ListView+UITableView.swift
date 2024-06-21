@@ -5,7 +5,7 @@
 //  Created by Frain on 2019/4/6.
 //
 
-#if os(iOS) || os(tvOS)
+#if !os(macOS)
 import UIKit
 
 private var listViewDefaultAnimationKey: Void?
@@ -14,24 +14,42 @@ public typealias TableView = UITableView
 
 extension UITableView: UIListView, SetuptableListView {
     public typealias Cell = UITableViewCell
-    
-    func setup(with listDelegate: ListDelegate) {
+
+    func setup(with listDelegate: Delegate) {
         dataSource = listDelegate
         delegate = listDelegate
     }
-    
-    func isDelegate(_ listDelegate: ListDelegate) -> Bool {
+
+    func isDelegate(_ listDelegate: Delegate) -> Bool {
         dataSource === listDelegate && delegate === listDelegate
     }
 }
 
 public extension UITableView {
-    
     var defaultAnimation: Animation {
         get { Associator.getValue(key: &listViewDefaultAnimationKey, from: self) ?? .fade }
         set { Associator.set(value: newValue, key: &listViewDefaultAnimationKey, to: self) }
     }
-    
+
+    func adapted<Adapter: ListAdapter>(
+        by listAdapter: Adapter,
+        animated: Bool = true,
+        completion: ((Bool) -> Void)? = nil
+    ) where Adapter.View: UITableView {
+        listDelegate.setCoordinator(
+            context: listAdapter.listCoordinatorContext,
+            animated: animated,
+            completion: completion
+        )
+    }
+
+    func resetDelegates(toNil: Bool) {
+        let temp = (dataSource, delegate)
+        (dataSource, delegate) = (nil, nil)
+        if toNil { return }
+        (dataSource, delegate) = temp
+    }
+
     func reloadSynchronously(animated: Bool = true) {
         if animated {
             reloadData()
@@ -45,7 +63,7 @@ public extension UITableView {
             layoutIfNeeded()
         }
     }
-    
+
     func perform(_ update: () -> Void, animated: Bool, completion: ((Bool) -> Void)?) {
         func _update() {
             if #available(iOS 11.0, *) {
@@ -66,57 +84,59 @@ public extension UITableView {
             CATransaction.commit()
         }
     }
-    
+
     func insertItems(at indexPaths: [IndexPath]) {
         insertRows(at: indexPaths, with: defaultAnimation.insertRows)
     }
-    
+
     func deleteItems(at indexPaths: [IndexPath]) {
         deleteRows(at: indexPaths, with: defaultAnimation.deleteRows)
     }
-    
+
     func reloadItems(at indexPaths: [IndexPath]) {
         reloadRows(at: indexPaths, with: defaultAnimation.reloadRows)
     }
-    
+
     func moveItem(at indexPath: IndexPath, to newIndexPath: IndexPath) {
         moveRow(at: indexPath, to: newIndexPath)
     }
-    
+
     func insertSections(_ sections: IndexSet) {
         insertSections(sections, with: defaultAnimation.insertSections)
     }
-    
+
     func deleteSections(_ sections: IndexSet) {
         deleteSections(sections, with: defaultAnimation.deleteSections)
     }
-    
+
     func reloadSections(_ sections: IndexSet) {
         reloadSections(sections, with: defaultAnimation.reloadSections)
     }
-    
+
     func selectItem(at indexPath: IndexPath?, animated: Bool, scrollPosition: ScrollPosition) {
         selectRow(at: indexPath, animated: animated, scrollPosition: scrollPosition)
     }
-    
+
     func deselectItem(at indexPath: IndexPath, animated: Bool) {
         deselectRow(at: indexPath, animated: animated)
     }
-    
+
     func register(supplementaryViewType: SupplementaryViewType, _ supplementaryClass: AnyClass?, identifier: String) {
         switch supplementaryViewType {
         case .header: register(supplementaryClass, forHeaderFooterViewReuseIdentifier: identifier)
         case .footer: register(supplementaryClass, forHeaderFooterViewReuseIdentifier: identifier)
         }
     }
-    
+
+    #if !os(visionOS)
     func register(supplementaryViewType: SupplementaryViewType, _ nib: UINib?, identifier: String) {
         switch supplementaryViewType {
         case .header: register(nib, forHeaderFooterViewReuseIdentifier: identifier)
         case .footer: register(nib, forHeaderFooterViewReuseIdentifier: identifier)
         }
     }
-    
+    #endif
+
     func cellForItem(at indexPath: IndexPath) -> UITableViewCell? {
         cellForRow(at: indexPath)
     }
@@ -127,7 +147,7 @@ public extension UITableView {
         case header
         case footer
     }
-    
+
     struct Animation: ListViewAnimationOption {
         let deleteSections: RowAnimation
         let insertSections: RowAnimation
@@ -135,7 +155,7 @@ public extension UITableView {
         let deleteRows: RowAnimation
         let insertRows: RowAnimation
         let reloadRows: RowAnimation
-        
+
         public init(animated: Bool) {
             if animated {
                 self.init()
@@ -143,7 +163,7 @@ public extension UITableView {
                 self.init(allUsing: .none)
             }
         }
-        
+
         public init(
             deleteSections: RowAnimation = .none,
             insertSections: RowAnimation = .none,
@@ -159,11 +179,11 @@ public extension UITableView {
             self.insertRows = insertRows
             self.reloadRows = reloadRows
         }
-        
+
         public init() {
             self.init(allUsing: .automatic)
         }
-        
+
         init(allUsing animation: RowAnimation) {
             deleteSections = animation
             insertSections = animation

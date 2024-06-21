@@ -8,9 +8,10 @@
 import Foundation
 
 public protocol ListView: NSObject {
+    func resetDelegates(toNil: Bool)
     func reloadSynchronously(animated: Bool)
     func perform(_ update: () -> Void, animated: Bool, completion: ((Bool) -> Void)?)
-    
+
     func insertItems(at indexPaths: [IndexPath])
     func deleteItems(at indexPaths: [IndexPath])
     func reloadItems(at indexPaths: [IndexPath])
@@ -21,21 +22,25 @@ public protocol ListView: NSObject {
     func moveSection(_ section: Int, toSection newSection: Int)
 }
 
-protocol SetuptableListView: ListView {
-    func setup(with listDelegate: ListDelegate)
-    func isDelegate(_ listDelegate: ListDelegate) -> Bool
+protocol DelegateSetuptable {
+    var listDelegate: Delegate { get }
+    func setup(with listDelegate: Delegate)
+    func isDelegate(_ listDelegate: Delegate) -> Bool
+    func isCoordinator(_ coordinator: AnyObject) -> Bool
 }
+
+protocol SetuptableListView: ListView, DelegateSetuptable { }
 
 private var listDelegateKey: Void?
 
 extension SetuptableListView {
-    var listDelegate: ListDelegate {
+    var listDelegate: Delegate {
         Associator.getValue(key: &listDelegateKey, from: self, initialValue: .init(self))
     }
-    
+
     func isCoordinator(_ coordinator: AnyObject) -> Bool {
-        if let delegate: ListDelegate = Associator.getValue(key: &listDelegateKey, from: self) {
-            return isDelegate(delegate) && delegate.context?.isCoordinator(coordinator) ?? false
+        if let delegate: Delegate = Associator.getValue(key: &listDelegateKey, from: self) {
+            return isDelegate(delegate)
         }
         return false
     }

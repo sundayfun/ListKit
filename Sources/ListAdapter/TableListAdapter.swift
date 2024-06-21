@@ -2,116 +2,26 @@
 //  TableListAdapter.swift
 //  ListKit
 //
-//  Created by Frain on 2019/12/10.
+//  Created by Frain on 2023/3/2.
 //
 
-public protocol TableListAdapter: ScrollListAdapter {
-    var tableList: TableList<SourceBase> { get }
+#if !os(macOS)
+
+public protocol TableListAdapter: ListAdapter where View == TableView, List == TableList { }
+
+public struct TableList: TableListAdapter {
+    public typealias View = TableView
+    public var list: TableList { return self }
+    public let listCoordinator: ListCoordinator
+    public let listCoordinatorContext: ListCoordinatorContext
 }
 
-@propertyWrapper
-@dynamicMemberLookup
-public struct TableList<Source: DataSource>: TableListAdapter, UpdatableDataSource
-where Source.SourceBase == Source {
-    public typealias Item = Source.Item
-    public typealias SourceBase = Source
-    let storage: ListAdapterStorage<Source>
-    let erasedGetter: (Self, ListOptions) -> TableList<AnySources>
-    
-    public var sourceBase: Source { source }
-    public var source: Source {
-        get { storage.source }
-        nonmutating set { storage.source = newValue }
-    }
-    
-    public var listUpdate: ListUpdate<SourceBase>.Whole { source.listUpdate }
-    public var listDiffer: ListDiffer<Source> { source.listDiffer }
-    public var listOptions: ListOptions { source.listOptions }
-    
-    public var listCoordinator: ListCoordinator<Source> { storage.listCoordinator }
-    public let listContextSetups: [(ListCoordinatorContext<SourceBase>) -> Void]
-    
-    public var coordinatorStorage: CoordinatorStorage<Source> { storage.coordinatorStorage }
-    
-    public var tableList: TableList<Source> { self }
-    
-    public var wrappedValue: Source {
-        get { source }
-        nonmutating set { source = newValue }
-    }
-    
-    public var projectedValue: TableList<Source> {
-        get { self }
-        set { self = newValue }
-    }
-    
-    public subscript<Value>(dynamicMember path: KeyPath<Source, Value>) -> Value {
-        source[keyPath: path]
-    }
-    
-    public subscript<Value>(dynamicMember path: WritableKeyPath<Source, Value>) -> Value {
-        get { source[keyPath: path] }
-        set { source[keyPath: path] = newValue }
-    }
-    
-    init(
-        listContextSetups: [(ListCoordinatorContext<SourceBase>) -> Void],
-        source: Source,
-        erasedGetter: @escaping (Self, ListOptions) -> TableList<AnySources> = Self.defaultErasedGetter
-    ) {
-        self.listContextSetups = listContextSetups
-        self.erasedGetter = erasedGetter
-        self.storage = .init(source: source)
-        storage.makeListCoordinator = { source.listCoordinator }
-    }
-}
-
-public extension TableListAdapter {
-    @discardableResult
-    func apply(
-        by tableView: TableView,
-        update: ListUpdate<SourceBase>.Whole?,
-        animated: Bool = true,
-        completion: ((Bool) -> Void)? = nil
-    ) -> TableList<SourceBase> {
-        let tableList = self.tableList
-        tableView.listDelegate.setCoordinator(
-            coordinator: tableList.storage.listCoordinator,
-            setups: listContextSetups,
-            update: update,
-            animated: animated,
-            completion: completion
+public extension ListBuilder where View == TableView {
+    static func buildFinalResult<List: ListAdapter>(_ component: List) -> TableList where List.View == TableView {
+        .init(
+            listCoordinator: component.listCoordinator,
+            listCoordinatorContext: component.listCoordinatorContext
         )
-        return tableList
-    }
-    
-    @discardableResult
-    func apply(
-        by tableView: TableView,
-        animated: Bool = true,
-        completion: ((Bool) -> Void)? = nil
-    ) -> TableList<SourceBase> {
-        apply(by: tableView, update: listUpdate, animated: animated, completion: completion)
-    }
-}
-
-extension TableList: CustomStringConvertible, CustomDebugStringConvertible {
-    public var description: String { "TableList(\(source))" }
-    public var debugDescription: String { "TableList(\(source))" }
-}
-
-extension TableList: ListAdapter {
-    typealias View = TableView
-    typealias Erased = TableList<AnySources>
-}
-
-#if os(iOS) || os(tvOS)
-
-import UIKit
-
-extension TableList {
-    static var rootKeyPath: ReferenceWritableKeyPath<CoordinatorContext, UITableListDelegate> {
-        \.tableListDelegate
     }
 }
 

@@ -5,69 +5,83 @@
 //  Created by Frain on 2020/8/2.
 //
 
+// swiftlint:disable comment_spacing
+
 import Foundation
 
-@dynamicMemberLookup
 public protocol Context {
-    associatedtype SourceBase: DataSource where SourceBase.SourceBase == SourceBase
-    associatedtype List
-    
-    var context: ListCoordinatorContext<SourceBase> { get }
-    var listView: List { get }
+    associatedtype View
+
+    var listView: View { get }
 }
 
-public struct ListContext<List, SourceBase: DataSource>: Context
-where SourceBase.SourceBase == SourceBase {
-    public let context: ListCoordinatorContext<SourceBase>
-    public let listView: List
-    let root: CoordinatorContext
+public struct ListContext<View>: Context {
+    public let listView: View
+    let context: ListCoordinatorContext
 }
 
-public struct ListIndexContext<List, SourceBase: DataSource, Index>: Context
-where SourceBase.SourceBase == SourceBase {
-    public let context: ListCoordinatorContext<SourceBase>
-    public let listView: List
+extension ListContext {
+    init(
+        view: AnyObject,
+        context: ListCoordinatorContext
+    ) {
+        self.init(listView: view as! View, context: context)
+    }
+}
+
+public struct ListIndexContext<View, Index>: Context {
+    public let listView: View
     public let index: Index
-    public let offset: Index
-    let root: CoordinatorContext
+    public let rawIndex: Index
+    let context: ListCoordinatorContext
 }
 
-public extension DataSource {
-    typealias ListSectionContext<List: ListView> = ListIndexContext<List, SourceBase, Int>
-    typealias ListItemContext<List: ListView> = ListIndexContext<List, SourceBase, IndexPath>
-}
-
-public extension Context {
-    var source: SourceBase.Source { context.listCoordinator.source }
-
-    subscript<Value>(dynamicMember keyPath: KeyPath<SourceBase.Source, Value>) -> Value {
-        source[keyPath: keyPath]
+extension ListIndexContext {
+    init(
+        view: AnyObject,
+        index: Index,
+        rawIndex: Index,
+        context: ListCoordinatorContext
+    ) {
+        self.init(
+            listView: view as! View,
+            index: index,
+            rawIndex: rawIndex,
+            context: context
+        )
     }
 }
 
 public extension ListIndexContext where Index == Int {
-    var section: Int { index - offset }
+    var section: Int { index }
 }
 
 public extension ListIndexContext where Index == IndexPath {
-    var section: Int { index.section - offset.section }
-    var item: Int { index.item - offset.item }
+    var section: Int { index.section }
+    var item: Int { index.item }
 }
 
 extension ListIndexContext where Index == IndexPath {
-    var itemValue: SourceBase.Item {
-        context.listCoordinator.item(at: index.offseted(offset, plus: false))
-    }
-    
-    func setNestedCache(update: @escaping (Any) -> Void) {
-        root.itemNestedCache[index.section][index.item] = update
-    }
-    
-    func itemCache<Cache>(or getter: (Self, SourceBase.Item) -> Cache) -> Cache {
-        root.itemCaches[index.section][index.item] as? Cache ?? {
-            let cache = getter(self, itemValue)
-            root.itemCaches[index.section][index.item] = cache
-            return cache
-        }()
+    func element<List: TypedListAdapter>(for type: List.Type) -> List.Element {
+        (context.coordinator as! List).element(at: self)
     }
 }
+
+//public extension ListIndexContext where Base: ModelCachedDataSource, Index == IndexPath {
+//    var modelCache: Base.ModelCache { cache() }
+//}
+//
+//extension ListIndexContext where Index == IndexPath {
+//    func setNestedCache(update: @escaping (Any) -> Void) {
+//        root.modelNestedCache[index.section][index.item] = update
+//    }
+//
+//    func cache<Cache>() -> Cache {
+//        if let cache = root.modelCaches[index.section][index.item] as? Cache { return cache }
+//        return context.listCoordinator.cache(
+//            for: &root.modelCaches[index.section][index.item],
+//            at: index,
+//            in: context.listDelegate
+//        )
+//    }
+//}
